@@ -1,0 +1,279 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+// ─── Enums ───────────────────────────────────────────────────────────────────
+
+enum UserRole {
+  SUPER_ADMIN
+  ORG_ADMIN
+  UMPIRE
+  COACH
+  MANAGER
+}
+
+enum MemberRole {
+  ADMIN
+  UMPIRE
+  COACH
+  MANAGER
+}
+
+enum GameStatus {
+  SCHEDULED
+  IN_PROGRESS
+  COMPLETED
+  CANCELLED
+}
+
+enum SubmissionStatus {
+  PENDING
+  SUBMITTED
+}
+
+enum IncidentSeverity {
+  LOW
+  MEDIUM
+  HIGH
+  CRITICAL
+}
+
+enum NotificationStatus {
+  PENDING
+  SENT
+  FAILED
+}
+
+// ─── Models ──────────────────────────────────────────────────────────────────
+
+model Org {
+  id          String   @id @default(cuid())
+  name        String
+  slug        String   @unique
+  logoUrl     String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  members     OrgMember[]
+  games       Game[]
+  incidents   Incident[]
+  invites     OrgInvite[]
+
+  @@map("orgs")
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  passwordHash String
+  firstName    String
+  lastName     String
+  phone        String?
+  avatarUrl    String?
+  role            UserRole @default(UMPIRE)
+  isActive        Boolean  @default(true)
+  emailVerifiedAt DateTime?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  orgMemberships      OrgMember[]
+  gamesAsUmpire       GameUmpire[]
+  gamesAsManager      GameManager[]
+  submissionsCreated  Submission[]       @relation("SubmissionCreator")
+  coachRatingsGiven   CoachUmpireRating[]
+  umpireRatingsGiven  UmpireManagerRating[] @relation("UmpireRater")
+  umpireRatingsAbout  UmpireManagerRating[] @relation("UmpireRated")
+  incidentsReported   Incident[]         @relation("IncidentReporter")
+  incidentsInvolving  Incident[]         @relation("IncidentSubject")
+  emailNotifications  EmailNotification[]
+  invitesCreated      OrgInvite[]
+  gamesCreated        Game[]             @relation("GameCreator")
+
+  @@map("users")
+}
+
+model OrgMember {
+  id        String     @id @default(cuid())
+  orgId     String
+  userId    String
+  role      MemberRole
+  joinedAt  DateTime   @default(now())
+
+  org  Org  @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([orgId, userId])
+  @@map("org_members")
+}
+
+model Game {
+  id          String     @id @default(cuid())
+  orgId       String
+  createdBy   String
+  title       String
+  homeTeam    String?
+  awayTeam    String?
+  location    String?
+  scheduledAt DateTime
+  sport       String     @default("baseball")
+  level       String?
+  status      GameStatus @default(SCHEDULED)
+  hasIncident Boolean    @default(false)
+  notes       String?
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  org          Org           @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  creator      User          @relation("GameCreator", fields: [createdBy], references: [id])
+  umpires      GameUmpire[]
+  managers     GameManager[]
+  submissions  Submission[]
+  incidents    Incident[]
+
+  @@map("games")
+}
+
+model GameUmpire {
+  id       String @id @default(cuid())
+  gameId   String
+  userId   String
+  position String @default("plate") // plate | base
+
+  game Game @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([gameId, userId])
+  @@map("game_umpires")
+}
+
+model GameManager {
+  id     String @id @default(cuid())
+  gameId String
+  userId String
+  team   String // home | away
+
+  game Game @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([gameId, userId])
+  @@map("game_managers")
+}
+
+model Submission {
+  id        String           @id @default(cuid())
+  gameId    String
+  createdBy String
+  status    SubmissionStatus @default(PENDING)
+  dueAt     DateTime?
+  closedAt  DateTime?
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
+
+  game              Game                  @relation(fields: [gameId], references: [id], onDelete: Cascade)
+  creator           User                  @relation("SubmissionCreator", fields: [createdBy], references: [id])
+  coachRatings      CoachUmpireRating[]
+  umpireRatings     UmpireManagerRating[]
+
+  @@map("submissions")
+}
+
+model CoachUmpireRating {
+  id           String   @id @default(cuid())
+  submissionId String
+  coachId      String
+  umpireId     String
+  noShow       Boolean  @default(false)
+  appearance   Int?     // 1–5, null when noShow=true
+  judgment     Int?     // 1–5
+  mechanics    Int?     // 1–5
+  gameControl  Int?     // 1–5
+  composure    Int?     // 1–5
+  attitude     Int?     // 1–5
+  comments     String?
+  submittedAt  DateTime @default(now())
+
+  submission Submission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  coach      User       @relation(fields: [coachId], references: [id])
+
+  @@unique([submissionId, coachId, umpireId])
+  @@map("coach_umpire_ratings")
+}
+
+model UmpireManagerRating {
+  id           String   @id @default(cuid())
+  submissionId String
+  umpireId     String
+  managerId    String
+  noShow        Boolean  @default(false)
+  sportsmanship Int?     // 1–5, null when noShow=true
+  cooperation   Int?     // 1–5
+  comments      String?
+  submittedAt   DateTime @default(now())
+
+  submission Submission @relation(fields: [submissionId], references: [id], onDelete: Cascade)
+  umpire     User       @relation("UmpireRater", fields: [umpireId], references: [id])
+  manager    User       @relation("UmpireRated", fields: [managerId], references: [id])
+
+  @@unique([submissionId, umpireId, managerId])
+  @@map("umpire_manager_ratings")
+}
+
+model Incident {
+  id          String           @id @default(cuid())
+  orgId       String
+  reportedBy  String
+  subjectId   String
+  gameId      String?
+  severity    IncidentSeverity @default(LOW)
+  title       String
+  description String
+  attachments String[]         @default([])
+  resolvedAt  DateTime?
+  createdAt   DateTime         @default(now())
+  updatedAt   DateTime         @updatedAt
+
+  org      Org   @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  reporter User  @relation("IncidentReporter", fields: [reportedBy], references: [id])
+  subject  User  @relation("IncidentSubject", fields: [subjectId], references: [id])
+  game     Game? @relation(fields: [gameId], references: [id])
+
+  @@map("incidents")
+}
+
+model OrgInvite {
+  id        String     @id @default(cuid())
+  orgId     String
+  code      String     @unique
+  role      MemberRole // role granted to whoever uses this code
+  createdBy String
+  isActive  Boolean    @default(true)
+  createdAt DateTime   @default(now())
+
+  org     Org  @relation(fields: [orgId], references: [id], onDelete: Cascade)
+  creator User @relation(fields: [createdBy], references: [id])
+
+  @@map("org_invites")
+}
+
+model EmailNotification {
+  id         String             @id @default(cuid())
+  userId     String
+  type       String?
+  relatedId  String?
+  subject    String
+  body       String
+  status     NotificationStatus @default(PENDING)
+  sentAt     DateTime?
+  error      String?
+  createdAt  DateTime           @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("email_notifications")
+}
