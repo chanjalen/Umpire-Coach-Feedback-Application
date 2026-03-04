@@ -1,4 +1,4 @@
-# UmpApp
+# Bluelytics
 
 Umpire and manager performance tracking system for organizations. Admins manage games, assign umpires and managers, and review ratings and incidents. Umpires and managers rate each other after each game through a structured submission window.
 
